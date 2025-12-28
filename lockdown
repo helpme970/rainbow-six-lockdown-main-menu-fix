@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+
+import sys
+import argparse
+from pathlib import Path
+import re
+import os
+from shutil import copy
+
+def patch(pattern, offset, exe_hex, orig, patch):
+    pattern = pattern.replace(" ", "").lower()
+    if (res := re.search(pattern, exe_hex)) is not None:
+        print(res)
+        addr = res.span()[0] + offset
+        patch = int_to_uint32_le_str(patch)
+
+        print(exe_hex[addr:addr + len(patch)])
+
+        if exe_hex[addr:addr + len(patch)] == orig:
+            exe_hex = exe_hex[:addr] + patch + exe_hex[addr + len(patch):]
+            return exe_hex
+        else:
+            return 1
+    else:
+        return 1
+
+def int_to_uint32_le_str(value):
+    # Mask to 32 bits (wrap around if needed)
+    wrapped = int(value) & 0xFFFFFFFF
+
+    # 4‑byte little‑endian bytes object
+    le_bytes = wrapped.to_bytes(4, byteorder="little", signed=False)
+
+    # Convert each byte to two‑digit hex and concatenate
+    return "".join(f"{b:02x}" for b in le_bytes)
+
+if __name__ == "__main__":
+    patcher_args = sys.argv[1:]
+
+    parser = argparse.ArgumentParser(description="Patch Rainbow Six Lockdown to use a custom main menu resolution.")
+
+    parser.add_argument("-w", "-x", "--width", action='store', default="1920", help="Set width for main menu.")
+    parser.add_argument("-y", "--height", action='store', default="1080", help="Set height for main menu.")
+    parser.add_argument("-g", "--gamepath", action='store', type=str, default=".", help="Path to game.")
+
+    patches = parser.parse_args(patcher_args)
+    
+    try:
+        if int(patches.width) > 0 and int(patches.height) > 0 and int(patches.width) < 4294967295 and int(patches.height) < 4294967295:
+            pass
+        else:
+            exit("\033[91mresolution cannot be negativ or higher then 4294967295")
+    except Exception as e:
+        print(e)
+        exit("\033[91mresolution must be an integer\033[m")
+
+    if patches.gamepath[-1] == "/" or patches.gamepath[-1] == "\\":
+        patches.gamepath = patches.gamepath[:len(patches.gamepath)-1]
+    game_dir = Path(patches.gamepath)
+    
+    exe_hex = open(f"{game_dir}/Lockdown.exe", "rb").read().hex()
+
+    ###########
+    ## WIDTH ##
+    ###########
+    patterns = ["68 .. .. .. .. 68 .. .. .. .. FF 92 D4 00 00 00 8B 06 6A 01 6A", "68 .. .. .. .. 68 .. .. .. .. FF 92 D4 00 00 00 8B 0D D4 F2 A5 00 E8"]
+
+    for i in patterns:
+        print(i)
+        res = patch(i, 12, exe_hex, "00 04 00 00".replace(" ", ""), patches.width)
+        if res != 1:
+            exe_hex = res
+            print(f"\033[92m✓ lockdown-patcher: width {patches.width}\033[m")
+        else:
+            print("\033[91m✗ lockdown-patcher: width pattern does not match\033[m")
+
+    ############
+    ## HEIGHT ##
+    ############
+    for i in patterns:
+        print(i)
+        res = patch(i, 2, exe_hex, "00 03 00 00".replace(" ", ""), patches.height)
+        if res != 1:
+            exe_hex = res
+            print(f"\033[92m✓ lockdown-patcher: height {patches.height}\033[m")
+        else:
+            print("\033[91m✗ lockdown-patcher: height pattern does not match\033[m")
+
+    if os.path.exists(f"{game_dir}/Lockdown.exe") and not os.path.exists(f"{game_dir}/Lockdown.exe.bak"):
+        copy(f"{game_dir}/Lockdown.exe", f"{game_dir}/Lockdown.exe.bak")
+        print("Lockdown.exe backuped as Lockdown.exe.bak")
+
+    #open(f"{game_dir}/Lockdown.exe", "wb").write(bytes.fromhex(exe_hex))
+    del exe_hex
